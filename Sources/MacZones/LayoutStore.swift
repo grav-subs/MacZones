@@ -9,6 +9,11 @@ final class LayoutStore: ObservableObject {
         didSet { scheduleSave() }
     }
 
+    /// True while the editor records a shortcut; global hot keys are paused so the keys reach the recorder.
+    @Published var isRecordingShortcut = false
+    /// Custom shortcuts that could not be registered (taken by macOS or another app).
+    @Published var failedShortcuts: Set<KeyCombo> = []
+
     private let fileURL: URL
     private var pendingSave: DispatchWorkItem?
 
@@ -69,6 +74,12 @@ final class LayoutStore: ObservableObject {
         let name = source.map { "\($0.name) (kopi)" } ?? "Nyt layout"
         let layout = Layout(id: UUID(), name: name, zones: zones)
         config.customLayouts.append(layout)
+        // Copies keep the source's shortcuts; the zones are in the same order.
+        if let source {
+            for (old, new) in zip(source.zones, zones) {
+                config.zoneShortcuts[new.id.uuidString] = config.zoneShortcuts[old.id.uuidString]
+            }
+        }
         return layout
     }
 
@@ -79,9 +90,10 @@ final class LayoutStore: ObservableObject {
     }
 
     func deleteLayout(id: UUID) {
-        config.customLayouts.removeAll { $0.id == id }
         config.screenLayouts = config.screenLayouts.filter { $0.value != id }
         config.layoutSpacing[id.uuidString] = nil
+        layout(id: id)?.zones.forEach { config.zoneShortcuts[$0.id.uuidString] = nil }
+        config.customLayouts.removeAll { $0.id == id }
     }
 
     func spacing(for layoutID: UUID) -> Double {
@@ -91,6 +103,25 @@ final class LayoutStore: ObservableObject {
     /// Pass nil to fall back to the default gap.
     func setSpacing(_ spacing: Double?, for layoutID: UUID) {
         config.layoutSpacing[layoutID.uuidString] = spacing
+    }
+
+    // MARK: Shortcuts
+
+    func shortcut(for zoneID: UUID) -> KeyCombo? {
+        config.zoneShortcuts[zoneID.uuidString]
+    }
+
+    /// Sets or clears a zone's shortcut. A combination can only belong to one zone per layout,
+    /// so it is removed from the layout's other zones.
+    func setShortcut(_ combo: KeyCombo?, for zoneID: UUID, in layoutID: UUID) {
+        var shortcuts = config.zoneShortcuts
+        if let combo, let layout = layout(id: layoutID) {
+            for zone in layout.zones where zone.id != zoneID && shortcuts[zone.id.uuidString] == combo {
+                shortcuts[zone.id.uuidString] = nil
+            }
+        }
+        shortcuts[zoneID.uuidString] = combo
+        config.zoneShortcuts = shortcuts
     }
 
     // MARK: Geometry

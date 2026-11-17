@@ -6,7 +6,7 @@ En macOS-udgave af FancyZones fra PowerToys: definer zoner på dine skærme og s
 
 - **Træk og slip:** Hold ⇧ Shift nede mens du trækker et vindue. Zonerne vises, og vinduet snapper til den zone du slipper i.
 - **Flere zoner:** Hold også ⌃ Control nede for at strække vinduet over flere zoner.
-- **Tastatur:** ⌃⌥← / ⌃⌥→ flytter det aktive vindue til forrige/næste zone (også på tværs af skærme). ⌃⌥1–9 flytter det til en bestemt zone.
+- **Tastatur:** ⌃⌥← / ⌃⌥→ flytter det aktive vindue til forrige/næste zone (også på tværs af skærme). ⌃⌥1–9 flytter det til en bestemt zone. Du kan også give hver zone sin egen genvej i layout-editoren (fx ⌘← til venstre zone i "2 kolonner").
 - **Layouts pr. skærm:** Vælg layout i menulinjen eller i editoren.
 - **Layout-editor:** Skabeloner (kolonner, prioritet, gitter …) samt dine egne layouts. Du kan trække zoner rundt, ændre størrelse, dele dem lodret/vandret og slette dem.
 - Justerbar afstand mellem zonerne.

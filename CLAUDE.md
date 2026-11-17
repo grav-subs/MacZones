@@ -22,7 +22,7 @@ When the user asks to install, set up or build MacZones ("Installér MacZones", 
    You cannot read the permission state directly, so ask the user to drag a window by its title bar while holding
    ⇧ Shift; the zones should appear and the window should snap when released.
 5. **Explain usage briefly:** the menu bar icon, drag with ⇧ Shift to snap, ⌃ Control to span zones,
-   ⌃⌥←/→ and ⌃⌥1–9 shortcuts, "Rediger layouts…" for the editor. Launch at login is enabled automatically on the
+   ⌃⌥←/→ and ⌃⌥1–9 shortcuts, custom per-zone shortcuts (select a zone in the editor → Optag genvej), "Rediger layouts…" for the editor. Launch at login is enabled automatically on the
    first run from `/Applications` and can be toggled in the menu.
 
 ### Troubleshooting
@@ -76,6 +76,9 @@ prebuilt app needs an Apple Developer ID and notarization.
   being dragged makes it jitter, because the view moves as it resizes.
 - `LayoutStore` saves are debounced (`scheduleSave`), since dragging in the editor changes the config many times a second.
   Call `saveNow()` when a write must happen immediately.
+- Custom zone shortcuts live in `Config.zoneShortcuts`, keyed by zone id. Template zones therefore get fixed ids derived
+  from the layout id and zone position (`LayoutTemplates.template`); never let them become random again. Global hot keys
+  are paused while the editor records (`LayoutStore.isRecordingShortcut`), or Carbon would swallow the keys.
 - Template layouts are read-only and have fixed UUIDs; per-layout gaps are stored in `Config.layoutSpacing` so they
   work for templates too.
 - Views that look up a layout by id must handle it being gone (deleting a layout re-renders before the selection changes).
