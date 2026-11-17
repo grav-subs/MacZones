@@ -4,6 +4,7 @@ import SwiftUI
 
 enum SidebarItem: Hashable {
     case layout(UUID)
+    case fixedSize(UUID)
     case screens
     case settings
 }
@@ -35,12 +36,25 @@ struct EditorView: View {
                     }
                     .buttonStyle(.borderless)
                 }
+                Section("Faste størrelser") {
+                    ForEach(store.config.fixedSizes) { size in
+                        FixedSizeRow(size: size).tag(SidebarItem.fixedSize(size.id))
+                    }
+                    Button {
+                        selection = .fixedSize(store.addFixedSize().id)
+                    } label: {
+                        Label("Ny størrelse", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 230)
         } detail: {
             switch selection {
             case .layout(let id) where store.layout(id: id) != nil:
                 LayoutDetail(layoutID: id, selection: $selection)
+            case .fixedSize(let id) where store.fixedSize(id: id) != nil:
+                FixedSizeDetail(sizeID: id, selection: $selection)
             case .settings:
                 SettingsView()
             default:
@@ -58,6 +72,22 @@ private struct LayoutRow: View {
             LayoutThumbnail(layout: layout)
                 .frame(width: 36, height: 22)
             Text(layout.name)
+        }
+    }
+}
+
+private struct FixedSizeRow: View {
+    let size: FixedSize
+
+    var body: some View {
+        HStack(spacing: 10) {
+            FixedSizeThumbnail(size: size)
+                .frame(width: 36, height: 22)
+            Text(size.name)
+            Spacer()
+            if let shortcut = size.shortcut {
+                Text(shortcut.displayString).foregroundStyle(.secondary).font(.caption)
+            }
         }
     }
 }
@@ -225,8 +255,10 @@ private struct LayoutDetail: View {
             )
 
             if let zoneID = selectedZone, let index = layout.zones.firstIndex(where: { $0.id == zoneID }) {
-                ShortcutRow(layoutID: layoutID, zoneID: zoneID, zoneNumber: index + 1)
-                    .id(zoneID)
+                ShortcutRecorder(title: "Genvej til zone \(index + 1)", combo: store.shortcut(for: zoneID)) {
+                    store.setShortcut($0, for: zoneID, in: layoutID)
+                }
+                .id(zoneID)
             }
 
             GapControl(layoutID: layoutID)
@@ -307,6 +339,142 @@ private struct LayoutDetail: View {
         layout.zones[index] = first
         layout.zones.insert(second, at: index + 1)
         binding.wrappedValue = layout
+    }
+}
+
+// MARK: - Fixed size detail
+
+private struct FixedSizeDetail: View {
+    @EnvironmentObject private var store: LayoutStore
+    let sizeID: UUID
+    @Binding var selection: SidebarItem?
+    @State private var screenID: String?
+
+    var body: some View {
+        // The size can disappear (e.g. right after deleting it) before the selection changes.
+        if let size = store.fixedSize(id: sizeID) {
+            content(size)
+        } else {
+            Text("Vælg en størrelse").foregroundStyle(.secondary)
+        }
+    }
+
+    private func content(_ size: FixedSize) -> some View {
+        let screen = previewScreen
+        let area = CGRect(origin: .zero, size: screen?.visibleFrame.size ?? CGSize(width: 1440, height: 900))
+        let rect = size.rect(in: area)
+
+        return VStack(alignment: .leading, spacing: 16) {
+            TextField("Navn", text: binding.name)
+                .textFieldStyle(.plain)
+                .font(.title2.weight(.semibold))
+
+            HStack(spacing: 14) {
+                Picker("Størrelse", selection: kindBinding) {
+                    ForEach(FixedSize.Kind.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+
+                switch size.kind {
+                case .pixels:
+                    PixelField(title: "Bredde", value: Int(size.width), editable: true) { binding.wrappedValue.width = Double(max($0, 100)) }
+                    PixelField(title: "Højde", value: Int(size.height), editable: true) { binding.wrappedValue.height = Double(max($0, 100)) }
+                    Text("px").foregroundStyle(.secondary)
+                case .ratio:
+                    PixelField(title: "Bredde", value: Int(size.width), editable: true) { binding.wrappedValue.width = Double(max($0, 1)) }
+                    Text(":")
+                    PixelField(title: "Højde", value: Int(size.height), editable: true) { binding.wrappedValue.height = Double(max($0, 1)) }
+                case .percent:
+                    PixelField(title: "Bredde", value: Int(size.width), editable: true) { binding.wrappedValue.width = Double($0.clamped(10, 100)) }
+                    PixelField(title: "Højde", value: Int(size.height), editable: true) { binding.wrappedValue.height = Double($0.clamped(10, 100)) }
+                    Text("%").foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .font(.callout)
+            // Fresh fields per size and kind, so an uncommitted value never lands on another one.
+            .id("\(sizeID)-\(size.kind.rawValue)")
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(nsColor: .underPageBackgroundColor))
+                GeometryReader { geo in
+                    let scale = geo.size.width / max(area.width, 1)
+                    ZoneTile(number: 0, selected: true, dimensions: "\(Int(rect.width)) × \(Int(rect.height))", showsNumber: false)
+                        .frame(width: rect.width * scale, height: rect.height * scale)
+                        .offset(x: rect.minX * scale, y: rect.minY * scale)
+                }
+            }
+            .aspectRatio(area.width / max(area.height, 1), contentMode: .fit)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            HStack(spacing: 12) {
+                Label("Vist på", systemImage: "display")
+                if NSScreen.screens.count > 1 {
+                    Picker("Skærm", selection: Binding(get: { screen?.stableID }, set: { screenID = $0 })) {
+                        ForEach(NSScreen.screens, id: \.stableID) { screen in
+                            Text(screen.localizedName).tag(Optional(screen.stableID))
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                } else if let screen {
+                    Text(screen.localizedName)
+                }
+                Text("Vinduet centreres på den skærm, det står på.").foregroundStyle(.secondary)
+                Spacer()
+            }
+            .font(.callout)
+
+            ShortcutRecorder(title: "Genvej", combo: size.shortcut) {
+                store.setShortcut($0, forFixedSize: sizeID)
+            }
+            .id(sizeID)
+            Text("Genvejen virker uanset hvilket layout skærmen bruger.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button("Slet størrelse", role: .destructive) {
+                    selection = .screens
+                    store.deleteFixedSize(id: sizeID)
+                }
+            }
+        }
+        .padding(20)
+        .navigationTitle(size.name)
+    }
+
+    private var previewScreen: NSScreen? {
+        NSScreen.screens.first { $0.stableID == screenID } ?? NSScreen.main
+    }
+
+    private var binding: Binding<FixedSize> {
+        Binding(
+            get: { store.fixedSize(id: sizeID) ?? FixedSize.examples[0] },
+            set: { store.update($0) }
+        )
+    }
+
+    /// Switching kind also resets the numbers, since they mean something else in each kind.
+    private var kindBinding: Binding<FixedSize.Kind> {
+        Binding(
+            get: { binding.wrappedValue.kind },
+            set: { kind in
+                var size = binding.wrappedValue
+                guard size.kind != kind else { return }
+                size.kind = kind
+                switch kind {
+                case .pixels: (size.width, size.height) = (1280, 720)
+                case .ratio: (size.width, size.height) = (16, 9)
+                case .percent: (size.width, size.height) = (80, 90)
+                }
+                binding.wrappedValue = size
+            }
+        )
     }
 }
 
@@ -430,22 +598,21 @@ private struct PixelField: View {
 
 // MARK: - Shortcut
 
-/// The selected zone's custom shortcut: shows it, records a new one, or clears it.
-private struct ShortcutRow: View {
+/// Shows a shortcut, records a new one, or clears it.
+/// `onChange` stores the new value and may return a note shown next to it (e.g. where the combination was moved from).
+private struct ShortcutRecorder: View {
     @EnvironmentObject private var store: LayoutStore
-    let layoutID: UUID
-    let zoneID: UUID
-    let zoneNumber: Int
+    let title: String
+    let combo: KeyCombo?
+    let onChange: (KeyCombo?) -> String?
 
     @State private var recording = false
     @State private var monitor: Any?
     @State private var hint: String?
 
     var body: some View {
-        let combo = store.shortcut(for: zoneID)
-
         HStack(spacing: 12) {
-            Label("Genvej til zone \(zoneNumber)", systemImage: "keyboard")
+            Label(title, systemImage: "keyboard")
             Button {
                 recording ? stopRecording() : startRecording()
             } label: {
@@ -454,7 +621,7 @@ private struct ShortcutRow: View {
             }
             if combo != nil && !recording {
                 Button {
-                    store.setShortcut(nil, for: zoneID, in: layoutID)
+                    hint = onChange(nil)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                 }
@@ -483,7 +650,7 @@ private struct ShortcutRow: View {
             if event.keyCode == UInt16(kVK_Escape) {
                 stopRecording()
             } else if let combo = KeyCombo(event: event) {
-                store.setShortcut(combo, for: zoneID, in: layoutID)
+                hint = onChange(combo)
                 stopRecording()
             } else {
                 hint = "Brug mindst én af ⌘, ⌃ eller ⌥."
@@ -910,6 +1077,7 @@ private struct ZoneTile: View {
     let dimensions: String
     /// Custom shortcut, e.g. "⌘←".
     var shortcut: String?
+    var showsNumber = true
 
     var body: some View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -920,8 +1088,10 @@ private struct ZoneTile: View {
             )
             .overlay(
                 VStack(spacing: 2) {
-                    Text("\(number)")
-                        .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    if showsNumber {
+                        Text("\(number)")
+                            .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    }
                     Text(dimensions)
                         .font(.system(size: 12, weight: .semibold).monospacedDigit())
                     if let shortcut {
@@ -938,6 +1108,26 @@ private struct ZoneTile: View {
                 .padding(4)
             )
             .contentShape(Rectangle())
+    }
+}
+
+private struct FixedSizeThumbnail: View {
+    let size: FixedSize
+
+    var body: some View {
+        GeometryReader { geo in
+            let area = CGRect(origin: .zero, size: NSScreen.main?.visibleFrame.size ?? CGSize(width: 1440, height: 900))
+            let rect = size.rect(in: area)
+            let sx = geo.size.width / area.width, sy = geo.size.height / area.height
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 3).fill(Color.secondary.opacity(0.15))
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.accentColor.opacity(0.35))
+                    .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Color.accentColor.opacity(0.8), lineWidth: 0.75))
+                    .frame(width: max(rect.width * sx - 2, 1), height: max(rect.height * sy - 2, 1))
+                    .offset(x: rect.minX * sx + 1, y: rect.minY * sy + 1)
+            }
+        }
     }
 }
 
@@ -964,6 +1154,12 @@ struct LayoutThumbnail: View {
                 }
             }
         }
+    }
+}
+
+private extension Int {
+    func clamped(_ lower: Int, _ upper: Int) -> Int {
+        Swift.min(Swift.max(self, lower), upper)
     }
 }
 

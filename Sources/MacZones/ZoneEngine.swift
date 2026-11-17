@@ -115,6 +115,16 @@ final class ZoneEngine {
         guard index < zones.count else { return }
         window.setFrame(zones[index])
     }
+
+    // MARK: Fixed sizes
+
+    /// Centers the focused window at a fixed size on its screen.
+    func applyFixedSize(id: UUID) {
+        guard let size = store.fixedSize(id: id),
+              let window = AXWindow.focused(), let frame = window.frame,
+              let screen = NSScreen.best(for: frame) else { return }
+        window.setFrame(size.rect(in: screen.axVisibleFrame))
+    }
 }
 
 private extension CGRect {

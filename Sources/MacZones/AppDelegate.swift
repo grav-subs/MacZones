@@ -26,13 +26,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Hot keys are paused while the editor records a shortcut, so the pressed keys reach the recorder.
         store.$config
-            .map { $0.hotkeysEnabled ? Set($0.zoneShortcuts.values) : nil }
+            .map { config in
+                config.hotkeysEnabled ? HotKeyState(
+                    zones: Set(config.zoneShortcuts.values),
+                    fixedSizes: Dictionary(config.fixedSizes.compactMap { size in size.shortcut.map { (size.id, $0) } },
+                                           uniquingKeysWith: { first, _ in first })
+                ) : nil
+            }
             .combineLatest(store.$isRecordingShortcut)
             .removeDuplicates { $0 == $1 }
-            .sink { [weak self] shortcuts, recording in
+            .sink { [weak self] state, recording in
                 guard let self else { return }
-                if let shortcuts, !recording {
-                    self.store.failedShortcuts = Shortcuts.register(engine: self.engine, zoneShortcuts: Array(shortcuts))
+                if let state, !recording {
+                    self.store.failedShortcuts = Shortcuts.register(
+                        engine: self.engine, zoneShortcuts: state.zones, fixedSizes: state.fixedSizes
+                    )
                 } else {
                     HotKeyCenter.shared.unregisterAll()
                 }
@@ -121,6 +129,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate()
         editorWindow?.makeKeyAndOrderFront(nil)
     }
+}
+
+/// The custom shortcuts to register; re-registered whenever it changes.
+private struct HotKeyState: Equatable {
+    var zones: Set<KeyCombo>
+    var fixedSizes: [UUID: KeyCombo]
 }
 
 private final class LayoutChoice: NSObject {
