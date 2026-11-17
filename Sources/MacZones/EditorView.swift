@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import SwiftUI
 
 enum SidebarItem: Hashable {
@@ -135,6 +136,8 @@ private struct SettingsView: View {
                 Toggle("Aktivér genveje", isOn: $store.config.hotkeysEnabled)
                 LabeledContent("Næste / forrige zone", value: "⌃⌥→  /  ⌃⌥←")
                 LabeledContent("Flyt til zone 1–9", value: "⌃⌥1 … ⌃⌥9")
+                Text("Du kan også give hver zone sin egen genvej: vælg zonen i layout-editoren og klik Optag genvej.")
+                    .foregroundStyle(.secondary)
             }
             Section("Tilladelser") {
                 LabeledContent("Tilgængelighed") {
@@ -221,6 +224,11 @@ private struct LayoutDetail: View {
                 screenID: Binding(get: { screen?.stableID }, set: { measureScreenID = $0 })
             )
 
+            if let zoneID = selectedZone, let index = layout.zones.firstIndex(where: { $0.id == zoneID }) {
+                ShortcutRow(layoutID: layoutID, zoneID: zoneID, zoneNumber: index + 1)
+                    .id(zoneID)
+            }
+
             GapControl(layoutID: layoutID)
 
             HStack {
@@ -276,6 +284,7 @@ private struct LayoutDetail: View {
     }
 
     private func deleteZone() {
+        if let selectedZone { store.setShortcut(nil, for: selectedZone, in: layoutID) }
         binding.wrappedValue.zones.removeAll { $0.id == selectedZone }
         selectedZone = nil
     }
@@ -419,6 +428,78 @@ private struct PixelField: View {
     }
 }
 
+// MARK: - Shortcut
+
+/// The selected zone's custom shortcut: shows it, records a new one, or clears it.
+private struct ShortcutRow: View {
+    @EnvironmentObject private var store: LayoutStore
+    let layoutID: UUID
+    let zoneID: UUID
+    let zoneNumber: Int
+
+    @State private var recording = false
+    @State private var monitor: Any?
+    @State private var hint: String?
+
+    var body: some View {
+        let combo = store.shortcut(for: zoneID)
+
+        HStack(spacing: 12) {
+            Label("Genvej til zone \(zoneNumber)", systemImage: "keyboard")
+            Button {
+                recording ? stopRecording() : startRecording()
+            } label: {
+                Text(recording ? "Tryk en tastekombination…" : combo?.displayString ?? "Optag genvej")
+                    .frame(minWidth: 140)
+            }
+            if combo != nil && !recording {
+                Button {
+                    store.setShortcut(nil, for: zoneID, in: layoutID)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("Fjern genvej")
+            }
+            if let hint {
+                Text(hint).foregroundStyle(.secondary)
+            } else if let combo, store.failedShortcuts.contains(combo), store.config.hotkeysEnabled, !recording {
+                Label("Bruges allerede af macOS eller en anden app", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            } else if !store.config.hotkeysEnabled {
+                Text("Genveje er slået fra under Indstillinger.").foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .font(.callout)
+        .onDisappear(perform: stopRecording)
+    }
+
+    private func startRecording() {
+        hint = nil
+        recording = true
+        store.isRecordingShortcut = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == UInt16(kVK_Escape) {
+                stopRecording()
+            } else if let combo = KeyCombo(event: event) {
+                store.setShortcut(combo, for: zoneID, in: layoutID)
+                stopRecording()
+            } else {
+                hint = "Brug mindst én af ⌘, ⌃ eller ⌥."
+            }
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        if recording { store.isRecordingShortcut = false }
+        recording = false
+    }
+}
+
 // MARK: - Gap
 
 /// Fixed gap between zones (and around the screen edge) for one layout.
@@ -457,6 +538,7 @@ private struct GapControl: View {
 // MARK: - Canvas
 
 private struct LayoutCanvas: View {
+    @EnvironmentObject private var store: LayoutStore
     @Binding var layout: Layout
     @Binding var selection: UUID?
     let editable: Bool
@@ -516,7 +598,12 @@ private struct LayoutCanvas: View {
         let selected = selection == zone.id
         let real = LayoutStore.zoneRect(zone, in: CGRect(origin: .zero, size: screenSize), spacing: spacing)
 
-        return ZoneTile(number: index + 1, selected: selected, dimensions: "\(Int(real.width)) × \(Int(real.height))")
+        return ZoneTile(
+            number: index + 1,
+            selected: selected,
+            dimensions: "\(Int(real.width)) × \(Int(real.height))",
+            shortcut: store.shortcut(for: zone.id)?.displayString
+        )
             .frame(width: max(rect.width, 1), height: max(rect.height, 1))
             .overlay(alignment: .bottomTrailing) {
                 if editable && selected {
@@ -821,6 +908,8 @@ private struct ZoneTile: View {
     let selected: Bool
     /// Real size in px, e.g. "860 × 1080".
     let dimensions: String
+    /// Custom shortcut, e.g. "⌘←".
+    var shortcut: String?
 
     var body: some View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -835,6 +924,13 @@ private struct ZoneTile: View {
                         .font(.system(size: 28, weight: .semibold, design: .rounded))
                     Text(dimensions)
                         .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                    if let shortcut {
+                        Text(shortcut)
+                            .font(.system(size: 12, weight: .semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.background.opacity(0.7), in: Capsule())
+                    }
                 }
                 .foregroundStyle(.primary)
                 .lineLimit(1)

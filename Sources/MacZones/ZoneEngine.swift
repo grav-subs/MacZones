@@ -104,6 +104,17 @@ final class ZoneEngine {
         guard number >= 1, number <= zones.count else { return }
         window.setFrame(zones[number - 1])
     }
+
+    /// Moves the focused window to the zone with this custom shortcut in the layout active on its screen.
+    func moveFocusedWindow(toZoneWith combo: KeyCombo) {
+        guard let window = AXWindow.focused(), let frame = window.frame,
+              let screen = NSScreen.best(for: frame) else { return }
+        let layout = store.layout(for: screen)
+        guard let index = layout.zones.firstIndex(where: { store.shortcut(for: $0.id) == combo }) else { return }
+        let zones = store.zoneRects(for: screen)
+        guard index < zones.count else { return }
+        window.setFrame(zones[index])
+    }
 }
 
 private extension CGRect {

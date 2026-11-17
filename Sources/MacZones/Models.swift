@@ -49,6 +49,8 @@ struct Config: Codable {
     var layoutSpacing: [String: Double] = [:]
     var activation: Activation = .shift
     var hotkeysEnabled = true
+    /// Custom shortcut per zone, keyed by zone id. Template zones have fixed ids, so this works for templates too.
+    var zoneShortcuts: [String: KeyCombo] = [:]
 
     init() {}
 
@@ -61,6 +63,7 @@ struct Config: Codable {
         layoutSpacing = try c.decodeIfPresent([String: Double].self, forKey: .layoutSpacing) ?? defaults.layoutSpacing
         activation = try c.decodeIfPresent(Activation.self, forKey: .activation) ?? defaults.activation
         hotkeysEnabled = try c.decodeIfPresent(Bool.self, forKey: .hotkeysEnabled) ?? defaults.hotkeysEnabled
+        zoneShortcuts = try c.decodeIfPresent([String: KeyCombo].self, forKey: .zoneShortcuts) ?? defaults.zoneShortcuts
     }
 }
 
@@ -82,8 +85,17 @@ enum LayoutTemplates {
     static let all = [priority, twoColumns, threeColumns, sixtyForty, rows, grid2x2, grid3x2, focus]
     static let defaultLayout = priority
 
+    /// Template zones get fixed ids derived from the layout id and their position, so settings keyed by zone id
+    /// (such as shortcuts) survive relaunches.
     private static func template(_ id: String, _ name: String, _ zones: [Zone]) -> Layout {
-        Layout(id: UUID(uuidString: id)!, name: name, zones: zones, isTemplate: true)
+        let layoutID = UUID(uuidString: id)!
+        let fixed = zones.enumerated().map { index, zone in
+            var copy = zone
+            let prefix = String(format: "00000000-0000-%04X", index + 1)
+            copy.id = UUID(uuidString: prefix + id.dropFirst(prefix.count))!
+            return copy
+        }
+        return Layout(id: layoutID, name: name, zones: fixed, isTemplate: true)
     }
 
     private static func columns(_ widths: [Double]) -> [Zone] {
@@ -105,5 +117,22 @@ enum LayoutTemplates {
                 )
             }
         }
+    }
+}
+
+/// A key plus Carbon modifier flags (`cmdKey`, `optionKey`, …), as passed to `RegisterEventHotKey`.
+struct KeyCombo: Codable, Hashable {
+    var keyCode: Int
+    var modifiers: Int
+    /// Label for the key itself, e.g. "←" or "K", captured when the shortcut was recorded.
+    var key: String
+
+    static func == (lhs: KeyCombo, rhs: KeyCombo) -> Bool {
+        lhs.keyCode == rhs.keyCode && lhs.modifiers == rhs.modifiers
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(keyCode)
+        hasher.combine(modifiers)
     }
 }

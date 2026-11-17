@@ -24,13 +24,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         dragMonitor.start()
 
+        // Hot keys are paused while the editor records a shortcut, so the pressed keys reach the recorder.
         store.$config
-            .map(\.hotkeysEnabled)
-            .removeDuplicates()
-            .sink { [weak self] enabled in
+            .map { $0.hotkeysEnabled ? Set($0.zoneShortcuts.values) : nil }
+            .combineLatest(store.$isRecordingShortcut)
+            .removeDuplicates { $0 == $1 }
+            .sink { [weak self] shortcuts, recording in
                 guard let self else { return }
-                if enabled {
-                    Shortcuts.register(engine: self.engine)
+                if let shortcuts, !recording {
+                    self.store.failedShortcuts = Shortcuts.register(engine: self.engine, zoneShortcuts: Array(shortcuts))
                 } else {
                     HotKeyCenter.shared.unregisterAll()
                 }
