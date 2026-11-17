@@ -51,6 +51,8 @@ struct Config: Codable {
     var hotkeysEnabled = true
     /// Custom shortcut per zone, keyed by zone id. Template zones have fixed ids, so this works for templates too.
     var zoneShortcuts: [String: KeyCombo] = [:]
+    /// Window sizes outside any layout, available on every screen via their own shortcut.
+    var fixedSizes: [FixedSize] = FixedSize.examples
 
     init() {}
 
@@ -64,6 +66,7 @@ struct Config: Codable {
         activation = try c.decodeIfPresent(Activation.self, forKey: .activation) ?? defaults.activation
         hotkeysEnabled = try c.decodeIfPresent(Bool.self, forKey: .hotkeysEnabled) ?? defaults.hotkeysEnabled
         zoneShortcuts = try c.decodeIfPresent([String: KeyCombo].self, forKey: .zoneShortcuts) ?? defaults.zoneShortcuts
+        fixedSizes = try c.decodeIfPresent([FixedSize].self, forKey: .fixedSizes) ?? defaults.fixedSizes
     }
 }
 
@@ -134,5 +137,58 @@ struct KeyCombo: Codable, Hashable {
     func hash(into hasher: inout Hasher) {
         hasher.combine(keyCode)
         hasher.combine(modifiers)
+    }
+}
+
+/// A window size that is not part of a layout. The window is centered on its screen.
+struct FixedSize: Codable, Identifiable, Hashable {
+    enum Kind: String, Codable, CaseIterable, Identifiable {
+        /// Exact size in points, scaled down (keeping the ratio) if it doesn't fit.
+        case pixels
+        /// The largest window with this aspect ratio that fits.
+        case ratio
+        /// Percent of the screen's usable area.
+        case percent
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .pixels: "Pixels"
+            case .ratio: "Forhold"
+            case .percent: "Procent"
+            }
+        }
+    }
+
+    var id = UUID()
+    var name: String
+    var kind: Kind
+    var width: Double
+    var height: Double
+    var shortcut: KeyCombo?
+
+    static let examples = [
+        FixedSize(id: UUID(uuidString: "00000000-0000-0000-0001-000000000001")!, name: "Fokus", kind: .percent, width: 80, height: 90),
+        FixedSize(id: UUID(uuidString: "00000000-0000-0000-0001-000000000002")!, name: "16:9", kind: .ratio, width: 16, height: 9),
+    ]
+
+    /// The window frame on a screen area `frame`, centered and rounded to whole points.
+    func rect(in frame: CGRect) -> CGRect {
+        let w = max(width, 1), h = max(height, 1)
+        var size: CGSize
+        switch kind {
+        case .pixels:
+            let scale = min(frame.width / w, frame.height / h, 1)
+            size = CGSize(width: w * scale, height: h * scale)
+        case .ratio:
+            let scale = min(frame.width / w, frame.height / h)
+            size = CGSize(width: w * scale, height: h * scale)
+        case .percent:
+            size = CGSize(width: frame.width * min(w, 100) / 100, height: frame.height * min(h, 100) / 100)
+        }
+        size = CGSize(width: size.width.rounded(.down), height: size.height.rounded(.down))
+        let origin = CGPoint(x: (frame.midX - size.width / 2).rounded(), y: (frame.midY - size.height / 2).rounded())
+        return CGRect(origin: origin, size: size)
     }
 }

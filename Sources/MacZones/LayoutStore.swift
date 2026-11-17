@@ -111,17 +111,79 @@ final class LayoutStore: ObservableObject {
         config.zoneShortcuts[zoneID.uuidString]
     }
 
-    /// Sets or clears a zone's shortcut. A combination can only belong to one zone per layout,
-    /// so it is removed from the layout's other zones.
-    func setShortcut(_ combo: KeyCombo?, for zoneID: UUID, in layoutID: UUID) {
-        var shortcuts = config.zoneShortcuts
-        if let combo, let layout = layout(id: layoutID) {
-            for zone in layout.zones where zone.id != zoneID && shortcuts[zone.id.uuidString] == combo {
-                shortcuts[zone.id.uuidString] = nil
+    /// Sets or clears a zone's shortcut. A combination belongs to one zone per layout and never also to a fixed size,
+    /// so it is removed from those. Returns a note naming where it was removed from, if anywhere.
+    @discardableResult
+    func setShortcut(_ combo: KeyCombo?, for zoneID: UUID, in layoutID: UUID) -> String? {
+        var config = config
+        var removed: [String] = []
+        if let combo {
+            if let layout = layout(id: layoutID) {
+                for (index, zone) in layout.zones.enumerated()
+                where zone.id != zoneID && config.zoneShortcuts[zone.id.uuidString] == combo {
+                    config.zoneShortcuts[zone.id.uuidString] = nil
+                    removed.append("zone \(index + 1)")
+                }
+            }
+            for index in config.fixedSizes.indices where config.fixedSizes[index].shortcut == combo {
+                config.fixedSizes[index].shortcut = nil
+                removed.append(config.fixedSizes[index].name)
             }
         }
-        shortcuts[zoneID.uuidString] = combo
-        config.zoneShortcuts = shortcuts
+        config.zoneShortcuts[zoneID.uuidString] = combo
+        self.config = config
+        return Self.removedNote(removed)
+    }
+
+    // MARK: Fixed sizes
+
+    func fixedSize(id: UUID) -> FixedSize? {
+        config.fixedSizes.first { $0.id == id }
+    }
+
+    @discardableResult
+    func addFixedSize() -> FixedSize {
+        let size = FixedSize(name: "Ny størrelse", kind: .pixels, width: 1280, height: 720)
+        config.fixedSizes.append(size)
+        return size
+    }
+
+    func update(_ size: FixedSize) {
+        guard let index = config.fixedSizes.firstIndex(where: { $0.id == size.id }) else { return }
+        config.fixedSizes[index] = size
+    }
+
+    func deleteFixedSize(id: UUID) {
+        config.fixedSizes.removeAll { $0.id == id }
+    }
+
+    /// Sets or clears a fixed size's shortcut, removing the combination from every zone and other fixed size.
+    /// Returns a note naming where it was removed from, if anywhere.
+    @discardableResult
+    func setShortcut(_ combo: KeyCombo?, forFixedSize id: UUID) -> String? {
+        var config = config
+        var removed: [String] = []
+        if let combo {
+            for layout in allLayouts {
+                for (index, zone) in layout.zones.enumerated() where config.zoneShortcuts[zone.id.uuidString] == combo {
+                    config.zoneShortcuts[zone.id.uuidString] = nil
+                    removed.append("zone \(index + 1) i \(layout.name)")
+                }
+            }
+            for index in config.fixedSizes.indices where config.fixedSizes[index].id != id && config.fixedSizes[index].shortcut == combo {
+                config.fixedSizes[index].shortcut = nil
+                removed.append(config.fixedSizes[index].name)
+            }
+        }
+        if let index = config.fixedSizes.firstIndex(where: { $0.id == id }) {
+            config.fixedSizes[index].shortcut = combo
+        }
+        self.config = config
+        return Self.removedNote(removed)
+    }
+
+    private static func removedNote(_ names: [String]) -> String? {
+        names.isEmpty ? nil : "Fjernet fra \(names.joined(separator: ", "))."
     }
 
     // MARK: Geometry

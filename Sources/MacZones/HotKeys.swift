@@ -59,10 +59,10 @@ enum Shortcuts {
         kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9,
     ]
 
-    /// Registers the fixed shortcuts plus every custom zone shortcut.
+    /// Registers the built-in shortcuts plus every custom zone and fixed size shortcut.
     /// Returns the custom combinations that could not be registered.
     @MainActor
-    static func register(engine: ZoneEngine, zoneShortcuts: [KeyCombo]) -> Set<KeyCombo> {
+    static func register(engine: ZoneEngine, zoneShortcuts: Set<KeyCombo>, fixedSizes: [UUID: KeyCombo]) -> Set<KeyCombo> {
         let center = HotKeyCenter.shared
         center.unregisterAll()
         center.register(keyCode: kVK_LeftArrow, modifiers: modifiers) { engine.moveFocusedWindow(by: -1) }
@@ -72,7 +72,15 @@ enum Shortcuts {
         }
         // The same combination may be used in several layouts; it is registered once and resolved when pressed.
         var failed = Set<KeyCombo>()
-        for combo in Set(zoneShortcuts) {
+        for (id, combo) in fixedSizes {
+            let ok = center.register(keyCode: combo.keyCode, modifiers: combo.modifiers) {
+                engine.applyFixedSize(id: id)
+            }
+            if !ok { failed.insert(combo) }
+        }
+        // The store keeps a combination off zones once a fixed size has it; skip it here too, just in case.
+        let fixedCombos = Set(fixedSizes.values)
+        for combo in zoneShortcuts where !fixedCombos.contains(combo) {
             let ok = center.register(keyCode: combo.keyCode, modifiers: combo.modifiers) {
                 engine.moveFocusedWindow(toZoneWith: combo)
             }
